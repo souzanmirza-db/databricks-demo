@@ -40,7 +40,7 @@
 
 -- COMMAND ----------
 
-CREATE INCREMENTAL LIVE TABLE sensors_bronze_dlt (
+CREATE INCREMENTAL LIVE TABLE sensors_bronze_dlt_fd (
   CONSTRAINT correct_schema EXPECT (_rescued_data IS NULL)
 )
 COMMENT "raw user data coming from json files ingested in incremental with Auto Loader to support schema inference and evolution"
@@ -48,7 +48,7 @@ AS SELECT * FROM cloud_files("/mnt/quentin-demo-resources/turbine/incoming-data-
 
 -- COMMAND ----------
 
-CREATE LIVE TABLE turbine_power_bronze_dlt
+CREATE LIVE TABLE turbine_power_bronze_dlt_fd
 (
   date string,
   power double, 
@@ -67,7 +67,7 @@ AS SELECT * FROM json.`/mnt/quentin-demo-resources/turbine/power/raw`
 
 -- COMMAND ----------
 
-CREATE INCREMENTAL LIVE TABLE sensors_silver_dlt (
+CREATE INCREMENTAL LIVE TABLE sensors_silver_dlt_fd (
   CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0) 
 )
 COMMENT "User data cleaned and anonymized for analysis."
@@ -81,11 +81,11 @@ AS SELECT AN3,
             ID,
             SPEED,
             TIMESTAMP
-from STREAM(live.sensors_bronze_dlt)
+from STREAM(live.sensors_bronze_dlt_fd)
 
 -- COMMAND ----------
 
-CREATE INCREMENTAL LIVE TABLE status_silver_dlt (
+CREATE INCREMENTAL LIVE TABLE status_silver_dlt_fd (
   CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0)
 )
 COMMENT "Turbine status"
@@ -93,7 +93,7 @@ AS SELECT * FROM cloud_files('/mnt/quentin-demo-resources/turbine/status', "parq
 
 -- COMMAND ----------
 
-CREATE LIVE TABLE turbine_power_silver_dlt (
+CREATE LIVE TABLE turbine_power_silver_dlt_fd (
   CONSTRAINT valid_id EXPECT (turbine_id IS NOT NULL and turbine_id > 0)
   )
   COMMENT "cleaned turbine power data."
@@ -105,7 +105,7 @@ AS SELECT
   cast(theoretical_power_curve as double),
   cast(wind_direction as double),
   cast(wind_speed as double)
-FROM LIVE.turbine_power_bronze_dlt
+FROM LIVE.turbine_power_bronze_dlt_fd
 
 -- COMMAND ----------
 
@@ -114,19 +114,19 @@ FROM LIVE.turbine_power_bronze_dlt
 
 -- COMMAND ----------
 
-CREATE INCREMENTAL LIVE TABLE sensor_gold_dlt (
+CREATE INCREMENTAL LIVE TABLE sensor_gold_dlt_fd (
   CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0) ON VIOLATION DROP ROW
 )
 COMMENT "Final sensor table with all information for Analysis / ML"
-AS SELECT * FROM STREAM(live.sensors_silver_dlt) LEFT JOIN live.status_silver_dlt USING (id)
+AS SELECT * FROM STREAM(live.sensors_silver_dlt_fd) LEFT JOIN live.status_silver_dlt_fd USING (id)
 
 -- COMMAND ----------
 
-CREATE LIVE TABLE turbine_power_gold_dlt (
+CREATE LIVE TABLE turbine_power_gold_dlt_fd (
   CONSTRAINT valid_id EXPECT (turbine_id IS NOT NULL and turbine_id > 0)
   )
   COMMENT "gold turbine power data ready for analysis"
 AS SELECT
   *,
   avg(power) over (PARTITION BY turbine_id ORDER BY timestamp range between 7200 PRECEDING and CURRENT ROW) AS average_power
-FROM LIVE.turbine_power_silver_dlt
+FROM LIVE.turbine_power_silver_dlt_fd
