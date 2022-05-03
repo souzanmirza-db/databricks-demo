@@ -40,6 +40,31 @@ except:
 
 # COMMAND ----------
 
+# DBTITLE 1,Download data from source
+try:
+  cloud_storage_path = f"/mnt/{mount_name}/turbine/incoming-data"
+  dbutils.fs.ls(cloud_storage_path)
+  print(f"Using default path {cloud_storage_path} as raw data location")
+  #raw data is set to the current user location where we just uploaded all the data
+  raw_data_location = cloud_storage_path #"/mnt/field-demos/media/toxicity"
+except:
+  print(f"Couldn't find data saved in the default mounted bucket. Will download it from NREL instead under {cloud_storage_path}.")
+#   print("Note: you need to specify your Kaggle Key under ./_resources/_kaggle_credential ...")
+  result = dbutils.notebook.run("./_resources/01_download", 300, {"cloud_storage_path": cloud_storage_path + "/toxicity"})
+  if result is not None and "ERROR" in result:
+    print("-------------------------------------------------------------")
+    print("---------------- !! ERROR DOWNLOADING DATASET !!-------------")
+    print("-------------------------------------------------------------")
+    print(result)
+    print("-------------------------------------------------------------")
+    raise RuntimeError(result)
+  else:
+    print(f"Success. Dataset downloaded from kaggle and saved under {cloud_storage_path}.")
+  raw_data_location = cloud_storage_path + "/toxicity"
+
+
+# COMMAND ----------
+
 # DBTITLE 1,Create User-Specific database
 current_user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().tags().apply('user')
 print("Created variables:")
