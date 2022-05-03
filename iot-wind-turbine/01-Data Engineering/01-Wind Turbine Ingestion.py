@@ -94,6 +94,52 @@ bronzeDF.writeStream \
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC create or replace table power_bronze 
+# MAGIC (
+# MAGIC   date timestamp,
+# MAGIC   power double, 
+# MAGIC   theoretical_power_curve double, 
+# MAGIC   turbine_id bigint, 
+# MAGIC   wind_direction double, 
+# MAGIC   wind_speed double) 
+# MAGIC   using delta ;
+# MAGIC   
+# MAGIC -- Turn on autocompaction to solve small files issues on your streaming job, that's all you have to do!
+# MAGIC alter table power_bronze set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+
+# COMMAND ----------
+
+# DBTITLE 1,Read in Power data and infer schema
+#Option 2, read from files instead
+bronze_powerDF = (spark.readStream 
+                .format("cloudFiles") 
+                .option("cloudFiles.format", "json") 
+                .option("cloudFiles.maxFilesPerTrigger", 1) 
+                .option("cloudfiles.schemaHints", "date timestamp, power double, theoretical_power_curve double, turbine_id bigint, wind_direction double, wind_speed double")
+                .option("cloudfiles.schemaLocation", path) 
+                .load("/mnt/quentin-demo-resources/turbine/power/raw") 
+                 )
+
+
+bronze_powerDF.writeStream \
+        .option("ignoreChanges", "true") \
+        .option("mergeSchema", "true") \
+        .trigger(processingTime='10 seconds') \
+        .table("power_bronze")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from power_bronze
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC describe power_bronze
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 2/ Silver layer: transform JSON data into tabular table
 
@@ -120,6 +166,28 @@ spark.readStream.table('turbine_bronze') \
 # MAGIC 
 # MAGIC -- Select data
 # MAGIC select * from turbine_silver;
+
+# COMMAND ----------
+
+# DBTITLE 1,Create unix timestamp for average power calculation
+spark.readStream.table('power_bronze') \
+     .withColumn("timestamp", unix_timestamp(to_timestamp('date'))) \
+     .writeStream \
+     .option("ignoreChanges", "true") \
+     .format("delta") \
+     .trigger(processingTime='10 seconds') \
+     .table("power_silver")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- let's add some constraints in our table, to ensure or ID can't be negative (need DBR 7.5)
+# MAGIC ALTER TABLE power_silver ADD CONSTRAINT idGreaterThanZero CHECK (turbine_id >= 0);
+# MAGIC -- let's enable the auto-compaction
+# MAGIC alter table power_silver set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
+# MAGIC 
+# MAGIC -- Select data
+# MAGIC select * from power_silver;
 
 # COMMAND ----------
 
@@ -156,6 +224,25 @@ turbine_stream.join(turbine_status, ['id'], 'left') \
 
 # MAGIC %sql
 # MAGIC select * from turbine_gold;
+
+# COMMAND ----------
+
+# DBTITLE 1,Calculate average power in gold table
+win = Window.partitionBy('turbine_id').orderBy("timestamp").rangeBetween(-7200, 0)
+
+(spark.read.table('power_silver') 
+     .withColumn("average_power", avg("power").over(win))  
+     .write
+     .option("ignoreChanges", "true") 
+     .format("delta") 
+     .mode("overwrite")    
+     .saveAsTable("power_gold")
+)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * from power_gold;
 
 # COMMAND ----------
 
