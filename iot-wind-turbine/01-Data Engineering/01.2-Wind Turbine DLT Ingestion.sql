@@ -36,138 +36,97 @@
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 1/ Bronze layer: ingest data from Kafka
+-- MAGIC ## 1/ Bronze layer: ingest data using cloud files
 
 -- COMMAND ----------
 
--- DBTITLE 1,Use this one by default
-CREATE INCREMENTAL LIVE TABLE users_bronze_dlt (
+CREATE INCREMENTAL LIVE TABLE sensors_bronze_dlt (
   CONSTRAINT correct_schema EXPECT (_rescued_data IS NULL)
 )
-COMMENT "raw turbine sensor data coming from json files ingested in incremental with Auto Loader to support schema inference and evolution"
-AS SELECT * FROM cloud_files("/mnt/quentin-demo-resources/turbine/incoming-data", "parquet")
+COMMENT "raw user data coming from json files ingested in incremental with Auto Loader to support schema inference and evolution"
+AS SELECT * FROM cloud_files("/mnt/quentin-demo-resources/turbine/incoming-data-json", "json")
 
 -- COMMAND ----------
 
--- MAGIC %python
--- MAGIC #Option 2, read from files instead
--- MAGIC # .maxFilesPerTrigger(1)
--- MAGIC 
--- MAGIC # bronzeDF = spark.readStream \
--- MAGIC #                 .format("cloudFiles") \
--- MAGIC #                 .option("cloudFiles.format", "parquet") \
--- MAGIC #                 .option("cloudFiles.maxFilesPerTrigger", 1) \
--- MAGIC #                 .schema("value string, key double") \
--- MAGIC #                 .load("/mnt/quentin-demo-resources/turbine/incoming-data") 
--- MAGIC 
--- MAGIC # bronzeDF.writeStream \
--- MAGIC #         .option("ignoreChanges", "true") \
--- MAGIC #         .trigger(processingTime='10 seconds') \
--- MAGIC #         .table("turbine_bronze")
-
--- COMMAND ----------
-
--- DBTITLE 1,Our raw data is now available in a Delta table, without having small files issues & with great performances
--- MAGIC %sql
--- MAGIC select * from turbine_bronze;
+CREATE LIVE TABLE turbine_power_bronze_dlt
+(
+  date string,
+  power double, 
+  theoretical_power_curve double, 
+  turbine_id bigint, 
+  wind_direction double, 
+  wind_speed double
+  )
+  COMMENT "raw turbine power data coming from json files"
+AS SELECT * FROM json.`/mnt/quentin-demo-resources/turbine/power/raw`
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 2/ Silver layer: transform JSON data into tabular table
+-- MAGIC ## 2/ Silver layer: clean bronze sensors, power data and read in status
 
 -- COMMAND ----------
 
--- MAGIC %python
--- MAGIC jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE", "ID"]] + [StructField("TIMESTAMP", TimestampType())])
--- MAGIC 
--- MAGIC spark.readStream.table('turbine_bronze') \
--- MAGIC      .withColumn("jsonData", from_json(col("value"), jsonSchema)) \
--- MAGIC      .select("jsonData.*") \
--- MAGIC      .writeStream \
--- MAGIC      .option("ignoreChanges", "true") \
--- MAGIC      .format("delta") \
--- MAGIC      .trigger(processingTime='10 seconds') \
--- MAGIC      .table("turbine_silver")
+CREATE INCREMENTAL LIVE TABLE sensors_silver_dlt (
+  CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0) 
+)
+COMMENT "User data cleaned and anonymized for analysis."
+AS SELECT AN3,
+            AN4,
+            AN5,
+            AN6,
+            AN7,
+            AN8,
+            AN9,
+            ID,
+            SPEED,
+            TIMESTAMP
+from STREAM(live.sensors_bronze_dlt)
 
 -- COMMAND ----------
 
--- MAGIC %sql
--- MAGIC -- let's add some constraints in our table, to ensure or ID can't be negative (need DBR 7.5)
--- MAGIC ALTER TABLE turbine_silver ADD CONSTRAINT idGreaterThanZero CHECK (id >= 0);
--- MAGIC -- let's enable the auto-compaction
--- MAGIC alter table turbine_silver set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
--- MAGIC 
--- MAGIC -- Select data
--- MAGIC select * from turbine_silver;
+CREATE INCREMENTAL LIVE TABLE status_silver_dlt (
+  CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0)
+)
+COMMENT "Turbine status"
+AS SELECT * FROM cloud_files('/mnt/quentin-demo-resources/turbine/status', "parquet", map("schema", "id int, status string"))
+
+-- COMMAND ----------
+
+CREATE LIVE TABLE turbine_power_silver_dlt (
+  CONSTRAINT valid_id EXPECT (turbine_id IS NOT NULL and turbine_id > 0)
+  )
+  COMMENT "cleaned turbine power data."
+AS SELECT
+  cast(turbine_id as int),
+  to_timestamp(date) as date,
+  unix_timestamp(to_timestamp(date)) as timestamp,
+  cast(power as double),
+  cast(theoretical_power_curve as double),
+  cast(wind_direction as double),
+  cast(wind_speed as double)
+FROM LIVE.turbine_power_bronze_dlt
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 3/ Gold layer: join information on Turbine status to add a label to our dataset
+-- MAGIC ## 3/ Gold layer: Join turbine sensors & status for ML and calculate average power
 
 -- COMMAND ----------
 
--- MAGIC %sql 
--- MAGIC create table if not exists turbine_status_gold (id int, status string) using delta;
--- MAGIC 
--- MAGIC COPY INTO turbine_status_gold
--- MAGIC   FROM '/mnt/quentin-demo-resources/turbine/status'
--- MAGIC   FILEFORMAT = PARQUET;
+CREATE INCREMENTAL LIVE TABLE sensor_gold_dlt (
+  CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0) ON VIOLATION DROP ROW
+)
+COMMENT "Final sensor table with all information for Analysis / ML"
+AS SELECT * FROM STREAM(live.sensors_silver_dlt) LEFT JOIN live.status_silver_dlt USING (id)
 
 -- COMMAND ----------
 
--- MAGIC %sql select * from turbine_status_gold
-
--- COMMAND ----------
-
--- DBTITLE 1,Join data with turbine status (Damaged or Healthy)
--- MAGIC %python
--- MAGIC turbine_stream = spark.readStream.table('turbine_silver')
--- MAGIC turbine_status = spark.read.table("turbine_status_gold")
--- MAGIC 
--- MAGIC turbine_stream.join(turbine_status, ['id'], 'left') \
--- MAGIC               .writeStream \
--- MAGIC               .option("ignoreChanges", "true") \
--- MAGIC               .format("delta") \
--- MAGIC               .trigger(processingTime='10 seconds') \
--- MAGIC               .table("turbine_gold")
-
--- COMMAND ----------
-
--- MAGIC %sql
--- MAGIC select * from turbine_gold;
-
--- COMMAND ----------
-
--- MAGIC %md 
--- MAGIC ## Run DELETE/UPDATE/MERGE with DELTA ! 
--- MAGIC We just realized that something is wrong in the data before 2020! Let's DELETE all this data from our gold table as we don't want to have wrong value in our dataset
-
--- COMMAND ----------
-
--- MAGIC %sql
--- MAGIC DELETE FROM turbine_gold where timestamp < '2020-00-01';
-
--- COMMAND ----------
-
--- MAGIC %sql
--- MAGIC -- DESCRIBE HISTORY turbine_gold;
--- MAGIC -- If needed, we can go back in time to select a specific version or timestamp
--- MAGIC SELECT * FROM turbine_gold TIMESTAMP AS OF '2020-12-01'
--- MAGIC 
--- MAGIC -- And restore a given version
--- MAGIC -- RESTORE turbine_gold TO TIMESTAMP AS OF '2020-12-01'
--- MAGIC 
--- MAGIC -- Or clone the table (zero copy)
--- MAGIC -- CREATE TABLE turbine_gold_clone [SHALLOW | DEEP] CLONE turbine_gold VERSION AS OF 32
-
--- COMMAND ----------
-
--- MAGIC %md 
--- MAGIC ## Our data is ready! Let's create a dashboard to monitor our Turbine plant using Databricks SQL Analytics
--- MAGIC 
--- MAGIC 
--- MAGIC ![turbine-demo-dashboard](https://github.com/QuentinAmbard/databricks-demo/raw/main/iot-wind-turbine/resources/images/turbine-demo-dashboard1.png)
--- MAGIC 
--- MAGIC [Open SQL Analytics dashboard](https://e2-demo-west.cloud.databricks.com/sql/dashboards/a81f8008-17bf-4d68-8c79-172b71d80bf0-turbine-demo?o=2556758628403379)
+CREATE LIVE TABLE turbine_power_gold_dlt (
+  CONSTRAINT valid_id EXPECT (turbine_id IS NOT NULL and turbine_id > 0)
+  )
+  COMMENT "gold turbine power data ready for analysis"
+AS SELECT
+  *,
+  avg(power) over (PARTITION BY turbine_id ORDER BY timestamp range between 7200 PRECEDING and CURRENT ROW) AS average_power
+FROM LIVE.turbine_power_silver_dlt
