@@ -94,10 +94,6 @@ bronzeDF.writeStream \
 
 # COMMAND ----------
 
-# MAGIC %sh head /dbfs/mnt/quentin-demo-resources/turbine/power/raw/part-00000-tid-5850270024693531659-7b3b44a5-71c5-4be8-8682-9d65b7dd72ea-5491-1-c000.json
-
-# COMMAND ----------
-
 # MAGIC %sql
 # MAGIC create or replace table power_bronze 
 # MAGIC (
@@ -111,11 +107,6 @@ bronzeDF.writeStream \
 # MAGIC   
 # MAGIC -- Turn on autocompaction to solve small files issues on your streaming job, that's all you have to do!
 # MAGIC alter table power_bronze set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC describe power_bronze
 
 # COMMAND ----------
 
@@ -233,10 +224,6 @@ turbine_stream.join(turbine_status, ['id'], 'left') \
 
 # MAGIC %sql
 # MAGIC select * from turbine_gold;
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
