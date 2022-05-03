@@ -1,4 +1,9 @@
 # Databricks notebook source
+# MAGIC %md 
+# MAGIC This notebook is in progress
+
+# COMMAND ----------
+
 try:
     cloud_storage_path
 except NameError:
@@ -66,7 +71,106 @@ ls /tmp/wind_turbine_download
 
 # COMMAND ----------
 
+display(spark.read.parquet('/mnt/quentin-demo-resources/turbine/gold/'))
 
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC select * from parquet.`/mnt/quentin-demo-resources/turbine/incoming-data`
+
+# COMMAND ----------
+
+# MAGIC %sh ls /tmp/wind_turbine_download/Damaged
+
+# COMMAND ----------
+
+# MAGIC %sh head /tmp/wind_turbine_download/Damaged/D1.mat
+
+# COMMAND ----------
+
+import os
+from scipy.io import loadmat
+mats = []
+root_dir = '/tmp/wind_turbine_download/Damaged'
+for root, dirs, files in os.walk(root_dir):
+    for file in files:
+        mats.append(loadmat(root_dir+'/'+file))
+
+# COMMAND ----------
+
+import numpy as np
+combined_mat = {}
+keys = ['Speed', 'Torque', 'AN3', 'AN4', 'AN5', 'AN6', 'AN7', 'AN8', 'AN9', 'AN10']
+for k in keys:
+  combined_mat[k] = np.concatenate([n[k] for n in mats]).flatten()
+  print(k, combined_mat[k][0])
+
+# COMMAND ----------
+
+# MAGIC %pip install faker
+
+# COMMAND ----------
+
+from faker import Faker
+fake = Faker()
+
+
+
+# COMMAND ----------
+
+help(fake.date_between)
+
+# COMMAND ----------
+
+k, combined_mat[k]
+
+# COMMAND ----------
+
+#check that there is enough entries for each sensor
+from collections import defaultdict 
+for k in keys:
+  print(k, combined_mat[k].size)
+
+#create the json data format
+wind_turbine_data = []
+for i in range(10): #combined_mat[k].size):
+  json_data = {}
+  for k in keys:
+    json_data[k] = combined_mat[k][i] 
+    json_data['TIMESTAMP'] = fake.date_time_between(start_date='now', end_date='-30d')
+  wind_turbine_data.append({'key': i, 'value': json_data}) 
+    
+
+# COMMAND ----------
+
+wind_turbine_data
+
+# COMMAND ----------
+
+from pyspark.sql.types import *
+
+# COMMAND ----------
+
+schema = StructType([StructField("Speed", StringType(), True),
+StructField("Torque", StringType(), True),
+StructField("AN3", StringType(), True),
+StructField("AN4", StringType(), True),
+StructField("AN5", StringType(), True),
+StructField("AN6", StringType(), True),
+StructField("AN7", StringType(), True),
+StructField("AN8", StringType(), True),
+StructField("AN9", StringType(), True),
+StructField("AN10", StringType(), True),
+  ])
+ 
+
+# COMMAND ----------
+
+type(combined_mat)
+
+# COMMAND ----------
+
+df = spark.createDataFrame(data=combined_mat, schema = schema)
 
 # COMMAND ----------
 
