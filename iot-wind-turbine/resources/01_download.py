@@ -1,9 +1,4 @@
 # Databricks notebook source
-# MAGIC %md 
-# MAGIC This notebook is in progress
-
-# COMMAND ----------
-
 # MAGIC %pip install faker
 
 # COMMAND ----------
@@ -12,6 +7,7 @@ try:
     cloud_storage_path = dbutils.widgets.get("cloud_storage_path")
 except NameError:
     cloud_storage_path = '/'
+print(cloud_storage_path)
 
 # COMMAND ----------
 
@@ -23,6 +19,7 @@ from scipy.io import loadmat
 import pyspark.pandas as pd
 from faker import Faker
 import datetime
+os.environ['cloud_storage_path'] = f'/dbfs{cloud_storage_path}'
 
 # COMMAND ----------
 
@@ -40,11 +37,7 @@ import datetime
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ##### Download wind turbine sensor dataset
-
-# COMMAND ----------
-
+# DBTITLE 1,Download wind turbine sensor dataset
 # MAGIC %sh
 # MAGIC rm -rf /tmp/wind_turbine_download/
 # MAGIC mkdir -p /tmp/wind_turbine_download/
@@ -53,11 +46,7 @@ import datetime
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ##### Unzip wind turbine sensors dataset
-
-# COMMAND ----------
-
+# DBTITLE 1,Unzip wind turbine sensors dataset
 # MAGIC %sh
 # MAGIC cd /tmp/wind_turbine_download
 # MAGIC unzip -o Damaged.zip
@@ -91,7 +80,7 @@ schema = StructType([
                     StructField('status', StringType(), True),
   ])
 turbine_sensor_data = spark.createDataFrame([], schema)
-display(turbine_sensor_data)
+turbine_sensor_data.printSchema()
 
 # COMMAND ----------
 
@@ -117,10 +106,6 @@ turbine_sensor_data = turbine_sensor_data.withColumn('id', when(col('status')=='
 
 # COMMAND ----------
 
-display(turbine_sensor_data)
-
-# COMMAND ----------
-
 fake = Faker()
 def fake_time():
   return fake.date_time_between(start_date=datetime.date(2014,2,28), end_date=datetime.date(2014,3,28))
@@ -139,18 +124,28 @@ cloud_storage_path
 
 # COMMAND ----------
 
+turbine_sensor_data = turbine_sensor_data.select(*[c.upper() for c in turbine_sensor_data.columns if c not in ['status', 'key']], 'key', 'status')
+display(turbine_sensor_data)
+
+# COMMAND ----------
+
 # DBTITLE 1,incoming_data_json
- turbine_sensor_data.drop('index', 'status').write.mode('overwrite').json(f'{cloud_storage_path}/incoming-data-json')
+ turbine_sensor_data.drop('key', 'status').write.mode('overwrite').json(f'{cloud_storage_path}/incoming-data-json')
 
 # COMMAND ----------
 
 # DBTITLE 1,incoming_data parquet
-turbine_sensor_data.withColumn('value', to_json(struct(col("Speed"), col("Torque"), col("AN3"), col("AN4"), col("AN5"), col("AN6"), col("AN7"), col("AN8"), col("AN9"), col("AN10"), col("id"), col("key"), col("Timestamp")))).select("key", "value").write.mode('overwrite').parquet(f'{cloud_storage_path}/incoming-data')
+turbine_sensor_data.withColumn('value', to_json(struct(col("SPEED"), col("TORQUE"), col("AN3"), col("AN4"), col("AN5"), col("AN6"), col("AN7"), col("AN8"), col("AN9"), col("AN10"), col("ID"), col("TIMESTAMP")))).select("key", "value").write.mode('overwrite').parquet(f'{cloud_storage_path}/incoming-data')
 
 # COMMAND ----------
 
 # DBTITLE 1,status
-turbine_sensor_data.select('id', 'status').write.mode('overwrite').parquet(f'{cloud_storage_path}/status')
+turbine_sensor_data.select('id', 'status').distinct().write.mode('overwrite').parquet(f'{cloud_storage_path}/status')
+
+# COMMAND ----------
+
+# DBTITLE 1,Gold data for ML
+turbine_sensor_data.select("AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "status").write.mode('overwrite').format("delta").save(f'{cloud_storage_path}/gold-data-for-ml')
 
 # COMMAND ----------
 
@@ -161,6 +156,17 @@ turbine_sensor_data.select('id', 'status').write.mode('overwrite').parquet(f'{cl
 # MAGIC |---|---|---|---|
 # MAGIC |Wind Turbine Gearbox Condition Monitoring Vibration Analysis Benchmarking Datasets|Creative Commons 4.0 License| https://data.openei.org/files/738/WindTurbineConditionMonitoringLicenseInfo.txt | https://data.openei.org/submissions/738
 # MAGIC <!-- |Kaggle|Apache-2.0 License |https://github.com/Kaggle/kaggle-api/blob/master/LICENSE|https://github.com/Kaggle/kaggle-api| -->
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC ## Wind Turbine Power
+# MAGIC copying over the power data for now will set it up to download from Kaggle next https://www.kaggle.com/datasets/berkerisen/wind-turbine-scada-dataset
+
+# COMMAND ----------
+
+# MAGIC %sh 
+# MAGIC cp -r /dbfs/mnt/quentin-demo-resources/turbine/power/raw $cloud_storage_path/power/ ;
 
 # COMMAND ----------
 

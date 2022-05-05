@@ -29,8 +29,8 @@ import re
 # COMMAND ----------
 
 # DBTITLE 1,Mount S3 bucket containing sensor data
-aws_bucket_name = "quentin-demo-resources"
-mount_name = "quentin-demo-resources"
+aws_bucket_name = "databricks-souzan-field-demo"
+mount_name = "databricks-souzan-field-demo"
 
 try:
   dbutils.fs.ls("/mnt/%s" % mount_name)
@@ -41,27 +41,26 @@ except:
 # COMMAND ----------
 
 # DBTITLE 1,Download data from source
-# try:
-#   cloud_storage_path = f"/mnt/{mount_name}/turbine/incoming-data"
-#   dbutils.fs.ls(cloud_storage_path)
-#   print(f"Using default path {cloud_storage_path} as raw data location")
-#   #raw data is set to the current user location where we just uploaded all the data
-#   raw_data_location = cloud_storage_path #"/mnt/field-demos/media/toxicity"
-# except:
-#   print(f"Couldn't find data saved in the default mounted bucket. Will download it from NREL instead under {cloud_storage_path}.")
-# #   print("Note: you need to specify your Kaggle Key under ./_resources/_kaggle_credential ...")
-#   result = dbutils.notebook.run("./_resources/01_download", 300, {"cloud_storage_path": cloud_storage_path + "/toxicity"})
-#   if result is not None and "ERROR" in result:
-#     print("-------------------------------------------------------------")
-#     print("---------------- !! ERROR DOWNLOADING DATASET !!-------------")
-#     print("-------------------------------------------------------------")
-#     print(result)
-#     print("-------------------------------------------------------------")
-#     raise RuntimeError(result)
-#   else:
-#     print(f"Success. Dataset downloaded from kaggle and saved under {cloud_storage_path}.")
-#   raw_data_location = cloud_storage_path + "/toxicity"
-
+try:
+  cloud_storage_path = f"/mnt/{mount_name}/turbine"
+  dbutils.fs.ls(cloud_storage_path)
+  print(f"Using default path {cloud_storage_path} as raw data location")
+  #raw data is set to the current user location where we just uploaded all the data
+  raw_data_location = cloud_storage_path #"/mnt/field-demos/media/toxicity"
+except:
+  print(f"Couldn't find data saved in the default mounted bucket. Will download it from NREL instead under {cloud_storage_path}.")
+#   print("Note: you need to specify your Kaggle Key under ./_resources/_kaggle_credential ...")
+  result = dbutils.notebook.run("./_resources/01_download", 300, {"cloud_storage_path": cloud_storage_path})
+  if result is not None and "ERROR" in result:
+    print("-------------------------------------------------------------")
+    print("---------------- !! ERROR DOWNLOADING DATASET !!-------------")
+    print("-------------------------------------------------------------")
+    print(result)
+    print("-------------------------------------------------------------")
+    raise RuntimeError(result)
+  else:
+    print(f"Success. Dataset downloaded from NREL and saved under {cloud_storage_path}.")
+  raw_data_location = cloud_storage_path
 
 # COMMAND ----------
 
@@ -97,16 +96,16 @@ if reset_all:
       
   spark.read.format("json") \
             .schema("turbine_id bigint, date timestamp, power float, wind_speed float, theoretical_power_curve float, wind_direction float") \
-            .load("/mnt/quentin-demo-resources/turbine/power/raw") \
+            .load(f"/mnt/{mount_name}/turbine/power/raw") \
        .write.format("delta").mode("overwrite").save(path+"/turbine/power/bronze/data")
   
   spark.sql("create table if not exists turbine_power using delta location '"+path+"/turbine/power/bronze/data'")
   
   # Create Gold Table containing "Labels"
   spark.sql("create table if not exists turbine_status_gold (id int, status string) using delta")
-  spark.sql("""
+  spark.sql(f"""
   COPY INTO turbine_status_gold
-    FROM '/mnt/quentin-demo-resources/turbine/status'
+    FROM '/mnt/{mount_name}/turbine/status'
     FILEFORMAT = PARQUET;
   """)
   
@@ -124,7 +123,7 @@ spark.conf.set("spark.databricks.cloudFiles.schemaInference.enabled", "true")
 
 # DBTITLE 1,Create "gold" tables for autoML(remove ID/Timestamp columns) and ML purposes
 if reset_all:
-  dataset = spark.read.load("/mnt/quentin-demo-resources/turbine/gold-data-for-ml")
+  dataset = spark.read.load(f"/mnt/{mount_name}/turbine/gold-data-for-ml")
   selected_features = ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "Speed", "status"]
   
   # IN CASE YOU'D LIKE TO JUMP DIRECTLY TO AutoML AFTER INGESTION/DATA-ENGINEERING DEMO
@@ -141,5 +140,5 @@ if reset_all:
   # Create "Gold" table for ML purpose and demo
   spark.sql("DROP TABLE IF EXISTS turbine_gold_for_ml")
   spark.sql(f"""CREATE TABLE turbine_gold_for_ml
-  LOCATION '/mnt/quentin-demo-resources/turbine/gold-data-for-ml'
+  LOCATION '/mnt/{mount_name}/turbine/gold-data-for-ml'
   """)

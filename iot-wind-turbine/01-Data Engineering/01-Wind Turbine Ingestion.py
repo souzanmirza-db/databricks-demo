@@ -42,12 +42,16 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 
 # DBTITLE 1,Let's explore what is being delivered by our wind turbines stream: (key, json)
 # MAGIC %sql 
-# MAGIC select * from parquet.`/mnt/quentin-demo-resources/turbine/incoming-data`
+# MAGIC select * from parquet.`/mnt/databricks-souzan-field-demo/turbine/incoming-data`
+
+# COMMAND ----------
+
+spark.read.parquet('/mnt/databricks-souzan-field-demo/turbine/incoming-data').printSchema()
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC create table if not exists turbine_bronze (key double not null, value string) using delta ;
+# MAGIC create or replace table turbine_bronze (key long not null, value string) using delta ;
 # MAGIC   
 # MAGIC -- Turn on autocompaction to solve small files issues on your streaming job, that's all you have to do!
 # MAGIC alter table turbine_bronze set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
@@ -78,8 +82,8 @@ bronzeDF = spark.readStream \
                 .format("cloudFiles") \
                 .option("cloudFiles.format", "parquet") \
                 .option("cloudFiles.maxFilesPerTrigger", 1) \
-                .schema("value string, key double") \
-                .load("/mnt/quentin-demo-resources/turbine/incoming-data") 
+                .schema("value string, key long") \
+                .load("/mnt/databricks-souzan-field-demo/turbine/incoming-data") 
 
 bronzeDF.writeStream \
         .option("ignoreChanges", "true") \
@@ -118,7 +122,7 @@ bronze_powerDF = (spark.readStream
                 .option("cloudFiles.maxFilesPerTrigger", 1) 
                 .option("cloudfiles.schemaHints", "date timestamp, power double, theoretical_power_curve double, turbine_id bigint, wind_direction double, wind_speed double")
                 .option("cloudfiles.schemaLocation", path) 
-                .load("/mnt/quentin-demo-resources/turbine/power/raw") 
+                .load("/mnt/databricks-souzan-field-demo/turbine/power/raw") 
                  )
 
 
@@ -135,17 +139,18 @@ bronze_powerDF.writeStream \
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC describe power_bronze
-
-# COMMAND ----------
-
 # MAGIC %md
 # MAGIC ## 2/ Silver layer: transform JSON data into tabular table
 
 # COMMAND ----------
 
-jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE", "ID"]] + [StructField("TIMESTAMP", TimestampType())])
+# MAGIC %sql
+# MAGIC select * from turbine_bronze limit 10;
+
+# COMMAND ----------
+
+jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE"]] + [StructField("TIMESTAMP", TimestampType())] + [StructField("ID", IntegerType())])
+
 
 spark.readStream.table('turbine_bronze') \
      .withColumn("jsonData", from_json(col("value"), jsonSchema)) \
@@ -200,12 +205,14 @@ spark.readStream.table('power_bronze') \
 # MAGIC create table if not exists turbine_status_gold (id int, status string) using delta;
 # MAGIC 
 # MAGIC COPY INTO turbine_status_gold
-# MAGIC   FROM '/mnt/quentin-demo-resources/turbine/status'
+# MAGIC   FROM '/mnt/databricks-souzan-field-demo/turbine/status'
 # MAGIC   FILEFORMAT = PARQUET;
 
 # COMMAND ----------
 
-# MAGIC %sql select * from turbine_status_gold
+from pyspark.sql.functions import count, countDistinct
+
+spark.read.table('turbine_status_gold').agg(count('id'), countDistinct('id')).show()
 
 # COMMAND ----------
 
