@@ -44,7 +44,7 @@ CREATE INCREMENTAL LIVE TABLE sensors_bronze_dlt_fd (
   CONSTRAINT correct_schema EXPECT (_rescued_data IS NULL)
 )
 COMMENT "raw user data coming from json files ingested in incremental with Auto Loader to support schema inference and evolution"
-AS SELECT * FROM cloud_files("/mnt/quentin-demo-resources/turbine/incoming-data-json", "json")
+AS SELECT * FROM cloud_files("/mnt/databricks-souzan-field-demo/turbine/incoming-data-json", "json")
 
 -- COMMAND ----------
 
@@ -58,7 +58,7 @@ CREATE LIVE TABLE turbine_power_bronze_dlt_fd
   wind_speed double
   )
   COMMENT "raw turbine power data coming from json files"
-AS SELECT * FROM json.`/mnt/quentin-demo-resources/turbine/power/raw`
+AS SELECT * FROM json.`/mnt/databricks-souzan-field-demo/turbine/power/raw`
 
 -- COMMAND ----------
 
@@ -89,7 +89,7 @@ CREATE INCREMENTAL LIVE TABLE status_silver_dlt_fd (
   CONSTRAINT valid_id EXPECT (id IS NOT NULL and id > 0)
 )
 COMMENT "Turbine status"
-AS SELECT * FROM cloud_files('/mnt/quentin-demo-resources/turbine/status', "parquet", map("schema", "id int, status string"))
+AS SELECT * FROM cloud_files('/mnt/databricks-souzan-field-demo/turbine/status', "parquet", map("schema", "id int, status string"))
 
 -- COMMAND ----------
 
