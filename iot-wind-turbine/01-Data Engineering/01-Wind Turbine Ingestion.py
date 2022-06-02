@@ -187,7 +187,7 @@ spark.readStream.table('power_bronze') \
 
 # MAGIC %sql
 # MAGIC -- let's add some constraints in our table, to ensure or ID can't be negative (need DBR 7.5)
-# MAGIC ALTER TABLE power_silver ADD CONSTRAINT idGreaterThanZero CHECK (turbine_id >= 0);
+# MAGIC ALTER TABLE power_silver ADD CONSTRAINT idGreaterThanZero2 CHECK (turbine_id >= 0);
 # MAGIC -- let's enable the auto-compaction
 # MAGIC alter table power_silver set tblproperties ('delta.autoOptimize.autoCompact' = true, 'delta.autoOptimize.optimizeWrite' = true);
 # MAGIC 
@@ -267,7 +267,7 @@ win = Window.partitionBy('turbine_id').orderBy("timestamp").rangeBetween(-7200, 
 # MAGIC %sql
 # MAGIC -- DESCRIBE HISTORY turbine_gold;
 # MAGIC -- If needed, we can go back in time to select a specific version or timestamp
-# MAGIC SELECT * FROM turbine_gold TIMESTAMP AS OF '2020-12-01'
+# MAGIC SELECT * FROM turbine_gold TIMESTAMP AS OF '2022-06-01'
 # MAGIC 
 # MAGIC -- And restore a given version
 # MAGIC -- RESTORE turbine_gold TO TIMESTAMP AS OF '2020-12-01'

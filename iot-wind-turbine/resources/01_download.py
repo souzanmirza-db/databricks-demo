@@ -1,5 +1,5 @@
 # Databricks notebook source
-# MAGIC %pip install faker
+# MAGIC %pip install faker kaggle
 
 # COMMAND ----------
 
@@ -56,13 +56,13 @@ os.environ['cloud_storage_path'] = f'/dbfs{cloud_storage_path}'
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Create Raw Layer & Save
+# MAGIC ### Create Raw Layer & Save
 # MAGIC Reformatting the data from mat to dataframes
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Process the data
+# MAGIC #### Process the data
 
 # COMMAND ----------
 
@@ -108,7 +108,7 @@ turbine_sensor_data = turbine_sensor_data.withColumn('id', when(col('status')=='
 
 fake = Faker()
 def fake_time():
-  return fake.date_time_between(start_date=datetime.date(2014,2,28), end_date=datetime.date(2014,3,28))
+  return fake.date_time_between(start_date=datetime.date(2018,1,1), end_date=datetime.date(2018,12,31))
 fake_time_udf = udf(fake_time, TimestampType())
 
 turbine_sensor_data = turbine_sensor_data.withColumn('Timestamp', fake_time_udf())
@@ -116,7 +116,7 @@ turbine_sensor_data = turbine_sensor_data.withColumn('Timestamp', fake_time_udf(
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Create Bronze Data & Move to Storage
+# MAGIC #### Create Bronze Data & Move to Storage
 
 # COMMAND ----------
 
@@ -161,13 +161,75 @@ turbine_sensor_data.select("AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN1
 
 # MAGIC %md 
 # MAGIC ## Wind Turbine Power
-# MAGIC copying over the power data for now will set it up to download from Kaggle next https://www.kaggle.com/datasets/berkerisen/wind-turbine-scada-dataset
+# MAGIC This dataset is from [Kaggle Scada Dataset](https://www.kaggle.com/datasets/berkerisen/wind-turbine-scada-dataset).
+# MAGIC 
+# MAGIC ### Installing Kaggle CLI to download the dataset
+# MAGIC 
+# MAGIC To use the Kaggle CLI, you need to create an acount on Kaggle (see [documentation here](https://www.kaggle.com/docs/api)). With this you will get a username and api_key.
+# MAGIC 
+# MAGIC To not expose the username and password on the notebook here, we use Databrick's secrets to store these informations and generate the json file required for running the Kaggle CLI. 
+# MAGIC 1. Generate a secret scope and create two secrets using the databricks cli (one for username, one for password). See [documentation cli](https://docs.databricks.com/dev-tools/cli/index.html) and [documentation secrets](https://docs.databricks.com/security/secrets/index.html)
+# MAGIC ```
+# MAGIC databricks secrets create-scope --scope <scope-name>
+# MAGIC databricks secrets put --scope <scope-name> --key <key-name>
+# MAGIC ```
+# MAGIC 2. The secrets in the notebook are, off course, redacted ([see here](https://docs.databricks.com/security/secrets/redaction.html)), so to use them we declare environment variables at the cluster creation ([see here](https://docs.databricks.com/security/secrets/secrets.html#store-the-path-to-a-secret-in-an-environment-variable)) and use an init script to create the json file. you can find the init.sh proposed in the ressource folder of this repos.
+# MAGIC ```
+# MAGIC if [ -n "$KAGGLE_USER" ]; then
+# MAGIC   mkdir -p /root/.kaggle
+# MAGIC   echo '{"username": ${KAGGLE_USER},"key": ${KAGGLE_APIKEY}}' > /root/.kaggle/kaggle.json
+# MAGIC   chmod 600 /root/.kaggle/kaggle.json
+# MAGIC   pip install kaggle
+# MAGIC fi
+# MAGIC ````
+# MAGIC 
+# MAGIC 3. The only thing left is to `pip install kaggle` to be able to run the cli
+# MAGIC 4. You are now ready to use the Kaggle CLI with this cluster on any notebook you attach it to.
 
 # COMMAND ----------
 
-# MAGIC %sh 
-# MAGIC cp -r /dbfs/mnt/quentin-demo-resources/turbine/power/raw $cloud_storage_path/power/ ;
+# MAGIC %run ./_kaggle_credential
 
 # COMMAND ----------
 
+if "KAGGLE_USERNAME" not in os.environ or os.environ['KAGGLE_USERNAME'] == "" or "KAGGLE_KEY" not in os.environ or os.environ['KAGGLE_KEY'] == "":
+  print("You need to specify your KAGGLE USERNAME and KAGGLE KEY to download the data")
+  print("Please open notebook under ./_resources/01_download and sepcify your Kaggle credential")
+  raise RuntimeError("Kaggle credential is required to download the data. Please open notebook under ./_resources/kaggle_credential and sepcify your Kaggle credential")
 
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC rm -rf /dbfs/tmp/wind_turbine_download/
+# MAGIC mkdir -p /dbfs/tmp/wind_turbine_download/
+# MAGIC cd /dbfs/tmp/wind_turbine_download/
+# MAGIC kaggle datasets download -d berkerisen/wind-turbine-scada-dataset 
+
+# COMMAND ----------
+
+# MAGIC %sh
+# MAGIC cd /dbfs/tmp/wind_turbine_download
+# MAGIC unzip -o wind-turbine-scada-dataset.zip
+# MAGIC ls .
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Create Raw Data & Save
+
+# COMMAND ----------
+
+power = (spark.read.csv('/tmp/wind_turbine_download/T1.csv', header=True)
+         .select(to_timestamp(col('Date/Time'), 'dd MM yyyy HH:mm').alias('date'), 
+                 col('LV ActivePower (kW)').cast('float').alias('power'), 
+                 col('Theoretical_Power_Curve (KWh)').cast('float').alias('theoretical_power_curve'), 
+                  lit(1).cast('int').alias('turbine_id'),
+                 col('Wind Direction (°)').cast('float').alias('wind_direction'), 
+                 col('Wind Speed (m/s)').cast('float').alias('wind_speed')
+                )
+        )
+display(power)
+
+# COMMAND ----------
+
+ power.write.mode('overwrite').json(f'{cloud_storage_path}/power/raw')
