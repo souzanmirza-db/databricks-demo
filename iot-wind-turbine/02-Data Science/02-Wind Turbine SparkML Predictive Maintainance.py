@@ -49,7 +49,7 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 
 # COMMAND ----------
 
-dataset = spark.read.table("turbine_gold_for_ml")
+dataset = spark.read.table("turbine_gold")
 display(dataset)
 
 # COMMAND ----------
@@ -65,7 +65,7 @@ with mlflow.start_run():
   #the source table will automatically be logged to mlflow
   mlflow.spark.autolog()
   
-  training, test = dataset.limit(1000).randomSplit([0.9, 0.1], seed = 42)
+  training, test = dataset.sample(1000/dataset.count()).randomSplit([0.9, 0.1], seed = 42)
   
   gbt = GBTClassifier(labelCol="label", featuresCol="features").setMaxIter(5)
   grid = ParamGridBuilder().addGrid(gbt.maxDepth, [3,4,5]).build()
@@ -129,7 +129,7 @@ model_from_registry = mlflow.spark.load_model(f"models:/turbine_gbt_{dbName}/pro
 # COMMAND ----------
 
 # DBTITLE 1,Let's call our model and make our predictive maintenance
-predictions = model_from_registry.transform(dataset).select("ID", "prediction")
+predictions = model_from_registry.transform(dataset).select("id", "prediction")
 display(predictions)
 
 # COMMAND ----------

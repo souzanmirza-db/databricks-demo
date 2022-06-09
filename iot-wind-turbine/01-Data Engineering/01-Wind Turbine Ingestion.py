@@ -46,10 +46,6 @@ dbutils.widgets.dropdown("reset_all_data", "false", ["true", "false"], "Reset al
 
 # COMMAND ----------
 
-spark.read.parquet('/mnt/databricks-souzan-field-demo/turbine/incoming-data').printSchema()
-
-# COMMAND ----------
-
 # MAGIC %sql
 # MAGIC create or replace table turbine_bronze (key long not null, value string) using delta ;
 # MAGIC   
@@ -76,8 +72,7 @@ bronzeDF.selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as valu
 
 # COMMAND ----------
 
-# DBTITLE 1,Use this one by default
-#Option 2, read from files instead
+# DBTITLE 1,Use cloudFiles to ingest sensor data
 bronzeDF = spark.readStream \
                 .format("cloudFiles") \
                 .option("cloudFiles.format", "parquet") \
@@ -144,11 +139,6 @@ bronze_powerDF.writeStream \
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC select * from turbine_bronze limit 10;
-
-# COMMAND ----------
-
 jsonSchema = StructType([StructField(col, DoubleType(), False) for col in ["AN3", "AN4", "AN5", "AN6", "AN7", "AN8", "AN9", "AN10", "SPEED", "TORQUE"]] + [StructField("TIMESTAMP", TimestampType())] + [StructField("ID", IntegerType())])
 
 
@@ -202,17 +192,11 @@ spark.readStream.table('power_bronze') \
 # COMMAND ----------
 
 # MAGIC %sql 
-# MAGIC create table if not exists turbine_status_gold (id int, status string) using delta;
+# MAGIC create or replace table turbine_status_gold (id int, status string) using delta;
 # MAGIC 
 # MAGIC COPY INTO turbine_status_gold
 # MAGIC   FROM '/mnt/databricks-souzan-field-demo/turbine/status'
 # MAGIC   FILEFORMAT = PARQUET;
-
-# COMMAND ----------
-
-from pyspark.sql.functions import count, countDistinct
-
-spark.read.table('turbine_status_gold').agg(count('id'), countDistinct('id')).show()
 
 # COMMAND ----------
 
@@ -255,25 +239,40 @@ win = Window.partitionBy('turbine_id').orderBy("timestamp").rangeBetween(-7200, 
 
 # MAGIC %md 
 # MAGIC ## Run DELETE/UPDATE/MERGE with DELTA ! 
-# MAGIC We just realized that something is wrong in the data before 2020! Let's DELETE all this data from our gold table as we don't want to have wrong value in our dataset
+# MAGIC We just realized that something is wrong in the data after 2014! Let's DELETE all this data from our gold table as we don't want to have wrong value in our dataset
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC DELETE FROM turbine_gold where timestamp < '2020-00-01';
+# MAGIC DELETE FROM turbine_gold where 'TIMESTAMP' > '2014-01-01';
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * from turbine_gold;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC describe history turbine_gold
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC -- DESCRIBE HISTORY turbine_gold;
 # MAGIC -- If needed, we can go back in time to select a specific version or timestamp
-# MAGIC SELECT * FROM turbine_gold TIMESTAMP AS OF '2022-06-01'
+# MAGIC RESTORE turbine_gold to VERSION as of 2;
 # MAGIC 
 # MAGIC -- And restore a given version
 # MAGIC -- RESTORE turbine_gold TO TIMESTAMP AS OF '2020-12-01'
 # MAGIC 
 # MAGIC -- Or clone the table (zero copy)
 # MAGIC -- CREATE TABLE turbine_gold_clone [SHALLOW | DEEP] CLONE turbine_gold VERSION AS OF 32
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * from turbine_gold;
 
 # COMMAND ----------
 
