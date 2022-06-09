@@ -130,3 +130,13 @@ AS SELECT
   *,
   avg(power) over (PARTITION BY turbine_id ORDER BY timestamp range between 7200 PRECEDING and CURRENT ROW) AS average_power
 FROM LIVE.turbine_power_silver_dlt_fd
+
+-- COMMAND ----------
+
+-- MAGIC %md 
+-- MAGIC How that our pipeline is declared let's run it using Delta Live Tables
+-- MAGIC 
+-- MAGIC 
+-- MAGIC <img src="https://raw.githubusercontent.com/souzanmirza-db/databricks-demo/main/iot-wind-turbine/resources/images/dlt_image.png" width="90%" />
+-- MAGIC 
+-- MAGIC [Checkout the DLT Pipeline](https://e2-demo-field-eng.cloud.databricks.com/?o=1444828305810485#joblist/pipelines/c0a42e33-daea-46c0-85b8-0f5ef65940ff/updates/11857ec8-33e8-4f53-9839-08b097372391)
